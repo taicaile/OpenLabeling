@@ -2,6 +2,7 @@
 .idea/
 venv/
 main/input/
-main/output
-object_detection/models/*
+main/output/
 main/class_list.txt
+object_detection/models/*
+.vscode

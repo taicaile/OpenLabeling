@@ -1,9 +1,9 @@
 #!/bin/python
-import argparse
-import glob
-import json
 import os
 import re
+import json
+import argparse
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -12,6 +12,8 @@ from tqdm import tqdm
 from lxml import etree
 import xml.etree.cElementTree as ET
 
+img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo']  # acceptable image suffixes
+vid_formats = ['mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv']  # acceptable video suffixes
 
 DELAY = 20 # keyboard delay (in milliseconds)
 WITH_QT = False
@@ -58,7 +60,8 @@ WINDOW_NAME    = 'OpenLabeling'
 TRACKBAR_IMG   = 'Image'
 TRACKBAR_CLASS = 'Class'
 
-annotation_formats = {'PASCAL_VOC' : '.xml', 'YOLO_darknet' : '.txt'}
+# annotation_formats = {'PASCAL_VOC' : '.xml', 'YOLO_darknet' : '.txt'}
+annotation_formats = {'YOLO_darknet' : '.txt'}
 TRACKER_DIR = os.path.join(OUTPUT_DIR, '.tracker')
 
 DRAW_FROM_PASCAL = args.draw_from_PASCAL_files
@@ -73,7 +76,8 @@ mouse_x = 0
 mouse_y = 0
 point_1 = (-1, -1)
 point_2 = (-1, -1)
-
+prept1 = (-1, -1)
+prept2 = (-1, -1)
 '''
     0,0 ------> x (width)
      |
@@ -206,7 +210,7 @@ def set_class_index(x):
     global class_index
     class_index = x
     text = 'Selected class {}/{} -> {}'.format(str(class_index), str(last_class_index), CLASS_LIST[class_index])
-    display_text(text, 3000)
+    display_text(text, 1000)
 
 
 def draw_edges(tmp_img):
@@ -385,10 +389,10 @@ def draw_bboxes_from_file(tmp_img, annotation_paths, width, height):
     ann_path = None
     if DRAW_FROM_PASCAL:
         # Drawing bounding boxes from the PASCAL files
-        ann_path = next(path for path in annotation_paths if 'PASCAL_VOC' in path)
+        ann_path = next(path for path in annotation_paths if annotation_formats['PASCAL_VOC'] in path)
     else:
         # Drawing bounding boxes from the YOLO files
-        ann_path = next(path for path in annotation_paths if 'YOLO_darknet' in path)
+        ann_path = next(path for path in annotation_paths if annotation_formats['YOLO_darknet'] in path)
     if os.path.isfile(ann_path):
         if DRAW_FROM_PASCAL:
             tree = ET.parse(ann_path)
@@ -397,7 +401,7 @@ def draw_bboxes_from_file(tmp_img, annotation_paths, width, height):
                 class_name, class_index, xmin, ymin, xmax, ymax = get_xml_object_data(obj)
                 #print('{} {} {} {} {}'.format(class_index, xmin, ymin, xmax, ymax))
                 img_objects.append([class_index, xmin, ymin, xmax, ymax])
-                color = class_rgb[class_index].tolist()
+                color = class_bgr[class_index].tolist()
                 # draw bbox
                 cv2.rectangle(tmp_img, (xmin, ymin), (xmax, ymax), color, LINE_THICKNESS)
                 # draw resizing anchors if the object is selected
@@ -414,7 +418,7 @@ def draw_bboxes_from_file(tmp_img, annotation_paths, width, height):
                     class_name, class_index, xmin, ymin, xmax, ymax = get_txt_object_data(obj, width, height)
                     #print('{} {} {} {} {}'.format(class_index, xmin, ymin, xmax, ymax))
                     img_objects.append([class_index, xmin, ymin, xmax, ymax])
-                    color = class_rgb[class_index].tolist()
+                    color = class_bgr[class_index].tolist()
                     # draw bbox
                     cv2.rectangle(tmp_img, (xmin, ymin), (xmax, ymax), color, LINE_THICKNESS)
                     # draw resizing anchors if the object is selected
@@ -728,10 +732,8 @@ def nonblank_lines(f):
 def get_annotation_paths(img_path, annotation_formats):
     annotation_paths = []
     for ann_dir, ann_ext in annotation_formats.items():
-        new_path = os.path.join(OUTPUT_DIR, ann_dir)
-        new_path = os.path.join(new_path, os.path.basename(os.path.normpath(img_path))) #img_path.replace(INPUT_DIR, new_path, 1)
-        pre_path, img_ext = os.path.splitext(new_path)
-        new_path = new_path.replace(img_ext, ann_ext, 1)
+        pre_path, img_ext = os.path.splitext(img_path)
+        new_path = pre_path+ann_ext
         annotation_paths.append(new_path)
     return annotation_paths
 
@@ -961,10 +963,10 @@ class LabelTracker():
 
 
 def complement_bgr(color):
-    lo = min(color)
-    hi = max(color)
-    k = lo + hi
-    return tuple(k - u for u in color)
+    B,G,R = color
+    luminance = ( 0.299 * R + 0.587 * G + 0.114 * B)/255
+    return (255,255,255) if luminance<=0.5 else (0,0,0)
+
 
 # change to the directory of this script
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -973,24 +975,25 @@ if __name__ == '__main__':
     # load all images and videos (with multiple extensions) from a directory using OpenCV
     IMAGE_PATH_LIST = []
     VIDEO_NAME_DICT = {}
-    for f in sorted(os.listdir(INPUT_DIR), key = natural_sort_key):
-        f_path = os.path.join(INPUT_DIR, f)
-        if os.path.isdir(f_path):
-            # skip directories
+    # for f in sorted(os.listdir(INPUT_DIR), key = natural_sort_key):
+    for f in tqdm(sorted(Path(INPUT_DIR).glob('**/*.*')),desc='scaning images and videos'):
+        if not f.is_file:
             continue
-        # check if it is an image
-        test_img = cv2.imread(f_path)
-        if test_img is not None:
-            IMAGE_PATH_LIST.append(f_path)
-        else:
+        
+        if f.suffix and f.suffix[1:] in img_formats:
+            # check if it is an image
+            test_img = cv2.imread(str(f))
+            if test_img is not None:
+                IMAGE_PATH_LIST.append(str(f))
+        elif f.suffix and f.suffix[1:] in vid_formats:
             # test if it is a video
-            test_video_cap = cv2.VideoCapture(f_path)
+            test_video_cap = cv2.VideoCapture(str(f))
             n_frames = int(test_video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
             test_video_cap.release()
             if n_frames > 0:
                 # it is a video
                 desired_img_format = '.jpg'
-                video_frames_path, video_name_ext = convert_video_to_images(f_path, n_frames, desired_img_format)
+                video_frames_path, video_name_ext = convert_video_to_images(str(f), n_frames, desired_img_format)
                 # add video frames to image list
                 frame_list = sorted(os.listdir(video_frames_path), key = natural_sort_key)
                 ## store information about those frames
@@ -1001,8 +1004,9 @@ if __name__ == '__main__':
                 indexes_dict['last_index'] = last_index
                 VIDEO_NAME_DICT[video_name_ext] = indexes_dict
                 IMAGE_PATH_LIST.extend((os.path.join(video_frames_path, frame) for frame in frame_list))
+    print(f"found {len(IMAGE_PATH_LIST)} images and {len(VIDEO_NAME_DICT)} videos")
+    assert len(IMAGE_PATH_LIST)>0 or len(VIDEO_NAME_DICT)>0, "no images found"
     last_img_index = len(IMAGE_PATH_LIST) - 1
-
     # create output directories
     if len(VIDEO_NAME_DICT) > 0:
         if not os.path.exists(TRACKER_DIR):
@@ -1017,7 +1021,7 @@ if __name__ == '__main__':
                 os.makedirs(new_video_dir)
 
     # create empty annotation files for each image, if it doesn't exist already
-    for img_path in IMAGE_PATH_LIST:
+    for img_path in tqdm(IMAGE_PATH_LIST, desc='loading label file'):
         # image info for the .xml file
         test_img = cv2.imread(img_path)
         abs_path = os.path.abspath(img_path)
@@ -1040,16 +1044,16 @@ if __name__ == '__main__':
 
     # Make the class colors the same each session
     # The colors are in BGR order because we're using OpenCV
-    class_rgb = [
+    class_bgr = [
         (0, 0, 255), (255, 0, 0), (0, 255, 0), (255, 255, 0), (0, 255, 255),
-        (255, 0, 255), (192, 192, 192), (128, 128, 128), (128, 0, 0),
+        (255, 0, 255), (0, 0, 0), (255, 128, 0), (128, 0, 0),
         (128, 128, 0), (0, 128, 0), (128, 0, 128), (0, 128, 128), (0, 0, 128)]
-    class_rgb = np.array(class_rgb)
+    class_bgr = np.array(class_bgr)
     # If there are still more classes, add new colors randomly
-    num_colors_missing = len(CLASS_LIST) - len(class_rgb)
+    num_colors_missing = len(CLASS_LIST) - len(class_bgr)
     if num_colors_missing > 0:
         more_colors = np.random.randint(0, 255+1, size=(num_colors_missing, 3))
-        class_rgb = np.vstack([class_rgb, more_colors])
+        class_bgr = np.vstack([class_bgr, more_colors])
 
     # create window
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_KEEPRATIO)
@@ -1071,7 +1075,7 @@ if __name__ == '__main__':
 
     # loop
     while True:
-        color = class_rgb[class_index].tolist()
+        color = class_bgr[class_index].tolist()
         # clone the img
         tmp_img = img.copy()
         height, width = tmp_img.shape[:2]
@@ -1106,6 +1110,8 @@ if __name__ == '__main__':
             if point_2[0] != -1:
                 # save the bounding box
                 save_bounding_box(annotation_paths, class_index, point_1, point_2, width, height)
+                prept1 = point_1[:]
+                prept2 = point_2[:]
                 # reset the points
                 point_1 = (-1, -1)
                 point_2 = (-1, -1)
@@ -1143,6 +1149,7 @@ if __name__ == '__main__':
                         '[q] to quit;\n'
                         '[a] or [d] to change Image;\n'
                         '[w] or [s] to change Class.\n'
+                        'Double click to select bounding box.\n'
                         )
                 display_text(text, 5000)
             # show edges key listener
@@ -1172,8 +1179,15 @@ if __name__ == '__main__':
                         label_tracker = LabelTracker(TRACKER_TYPE, init_frame, next_frame_path_list)
                         for obj in object_list:
                             class_index = obj[0]
-                            color = class_rgb[class_index].tolist()
+                            color = class_bgr[class_index].tolist()
                             label_tracker.start_tracker(json_file_data, json_file_path, img_path, obj, color, annotation_formats)
+            elif pressed_key == ord('v'):
+                if -1 not in prept1 and -1 not in prept2:
+                    display_text(f'v is pressed : {prept1},{prept2}', 500)
+                    cv2.rectangle(tmp_img, prept1, prept2, color, LINE_THICKNESS)
+                    # save the bounding box
+                    save_bounding_box(annotation_paths, class_index, prept1, prept2, width, height)
+                
             # quit key listener
             elif pressed_key == ord('q'):
                 break
