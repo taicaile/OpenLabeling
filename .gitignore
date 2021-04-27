@@ -1,8 +1,8 @@
 *.pyc
 .idea/
 venv/
-main/input/
-main/output/
-main/class_list.txt
+input/
+output/
+class_list.txt
 object_detection/models/*
 .vscode
