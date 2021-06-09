@@ -37,8 +37,9 @@ tracker_types = ['CSRT', 'KCF','MOSSE', 'MIL', 'BOOSTING', 'MEDIANFLOW', 'TLD', 
 '''
 parser.add_argument('--tracker', default='KCF', type=str, help="tracker_type being used: ['CSRT', 'KCF','MOSSE', 'MIL', 'BOOSTING', 'MEDIANFLOW', 'TLD', 'GOTURN', 'DASIAMRPN']")
 parser.add_argument('-n', '--n_frames', default='200', type=int, help='number of frames to track object for')
+parser.add_argument('--read-only', dest='read_only', action='store_true', help='enable read only mode.')
 args = parser.parse_args()
-
+print(args)
 class_index = 0
 img_index = 0
 img = None
@@ -280,9 +281,18 @@ def write_xml(xml_str, xml_path):
 
 
 def append_bb(ann_path, line, extension):
+    if args.read_only:
+        return
+
     if '.txt' in extension:
-        with open(ann_path, 'a') as myfile:
-            myfile.write(line + '\n') # append line
+        with open(ann_path, 'r+') as f:
+            lines = [line for line in f.read().split('\n') if line]
+            lines.append(line)
+            f.seek(0,0)
+            f.write('\n'.join(lines))
+            
+        # with open(ann_path, 'a') as myfile:
+        #     myfile.write(line + '\n') # append line
     elif '.xml' in extension:
         class_name, xmin, ymin, xmax, ymax = line
 
@@ -409,7 +419,9 @@ def draw_bboxes_from_file(tmp_img, annotation_paths, width, height):
             # Draw from YOLO
             with open(ann_path) as fp:
                 for idx, line in enumerate(fp):
-                    obj = line
+                    obj = line.strip()
+                    if not obj:
+                        continue
                     class_name, class_index, xmin, ymin, xmax, ymax = get_txt_object_data(obj, width, height)
                     #print('{} {} {} {} {}'.format(class_index, xmin, ymin, xmax, ymax))
                     img_objects.append([class_index, xmin, ymin, xmax, ymax])
@@ -539,7 +551,8 @@ def edit_bbox(obj_to_edit, action):
                 # save the edited data
                 with open(json_file_path, 'w') as outfile:
                     json.dump(json_file_data, outfile, sort_keys=True, indent=4)
-
+    if args.read_only:
+        return
     # 3. loop through bboxes_to_edit_dict and edit the corresponding annotation files
     for path in bboxes_to_edit_dict:
         obj_to_edit = bboxes_to_edit_dict[path]
