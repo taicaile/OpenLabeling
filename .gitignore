@@ -3,6 +3,6 @@
 venv/
 input/
 output/
-class_list.txt
+class_list*.txt
 object_detection/models/*
 .vscode
