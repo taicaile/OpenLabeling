@@ -18,7 +18,7 @@ from utils.utils import with_qt_test
 img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo']  # acceptable image suffixes
 vid_formats = ['mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv']  # acceptable video suffixes
 
-DELAY = 20 # keyboard delay (in milliseconds)
+DELAY = 40 # keyboard delay (in milliseconds)
 WITH_QT = with_qt_test()
 
 parser = argparse.ArgumentParser(description='Open-source image labeling tool')
@@ -26,6 +26,7 @@ parser.add_argument('-i', '--input_dir', default='input', type=str, help='Path t
 parser.add_argument('-o', '--output_dir', default='output', type=str, help='Path to output directory')
 parser.add_argument('-t', '--thickness', default='1', type=int, help='Bounding box and cross line thickness')
 parser.add_argument('--draw-from-PASCAL-files', action='store_true', help='Draw bounding boxes from the PASCAL files') # default YOLO
+parser.add_argument('-c', '--class-list', default='class_list.txt', type=str, help='the class_list txt path')
 '''
 tracker_types = ['CSRT', 'KCF','MOSSE', 'MIL', 'BOOSTING', 'MEDIANFLOW', 'TLD', 'GOTURN', 'DASIAMRPN']
     Recomended tracker_type:
@@ -71,8 +72,7 @@ mouse_x = 0
 mouse_y = 0
 point_1 = (-1, -1)
 point_2 = (-1, -1)
-prept1 = (-1, -1)
-prept2 = (-1, -1)
+box_records = []
 '''
     0,0 ------> x (width)
      |
@@ -964,7 +964,7 @@ if __name__ == '__main__':
                     create_PASCAL_VOC_xml(ann_path, abs_path, folder_name, image_name, img_height, img_width, depth)
 
     # load class list
-    with open('class_list.txt') as f:
+    with open(args.class_list) as f:
         CLASS_LIST = list(nonblank_lines(f))
     #print(CLASS_LIST)
     last_class_index = len(CLASS_LIST) - 1
@@ -999,7 +999,8 @@ if __name__ == '__main__':
     edges_on = False
 
     display_text('Welcome!\n Press [h] for help.', 4000)
-
+    preimg = None
+    press_cnt_r = 0
     # loop
     while True:
         color = class_bgr[class_index].tolist()
@@ -1037,13 +1038,14 @@ if __name__ == '__main__':
             if point_2[0] != -1:
                 # save the bounding box
                 save_bounding_box(annotation_paths, class_index, point_1, point_2, width, height)
-                prept1 = point_1[:]
-                prept2 = point_2[:]
+                box_records.append([point_1[:], point_2[:], color, class_index])
                 # reset the points
                 point_1 = (-1, -1)
                 point_2 = (-1, -1)
 
-        cv2.imshow(WINDOW_NAME, tmp_img)
+        if preimg is None or (preimg.shape!=tmp_img.shape) or not (preimg==tmp_img).all():
+            cv2.imshow(WINDOW_NAME, tmp_img)
+            preimg = tmp_img.copy()
         pressed_key = cv2.waitKey(DELAY)
 
         if dragBBox.anchor_being_dragged is None:
@@ -1076,6 +1078,7 @@ if __name__ == '__main__':
                         '[q] to quit;\n'
                         '[a] or [d] to change Image;\n'
                         '[w] or [s] to change Class.\n'
+                        '[r] to begin/end record, and [v] to paste.\n'
                         'Double click to select bounding box.\n'
                         )
                 display_text(text, 5000)
@@ -1109,12 +1112,21 @@ if __name__ == '__main__':
                             color = class_bgr[class_index].tolist()
                             label_tracker.start_tracker(json_file_data, json_file_path, img_path, obj, color, annotation_formats)
             elif pressed_key == ord('v'):
-                if -1 not in prept1 and -1 not in prept2:
-                    display_text(f'v is pressed : {prept1},{prept2}', 500)
-                    cv2.rectangle(tmp_img, prept1, prept2, color, LINE_THICKNESS)
-                    # save the bounding box
-                    save_bounding_box(annotation_paths, class_index, prept1, prept2, width, height)
-                
+                if box_records:
+                    display_text(f'v is pressed, {len(box_records)} boxes copied', 500)
+                    for prept1, prept2, color, class_index in box_records:
+                        cv2.rectangle(tmp_img, prept1, prept2, color, LINE_THICKNESS)
+                        # save the bounding box
+                        save_bounding_box(annotation_paths, class_index, prept1, prept2, width, height)
+            elif pressed_key == ord('r'):
+                press_cnt_r+=1
+                if press_cnt_r==1:
+                    box_records.clear()
+                    display_text("boxes record start.", 1000)
+                elif press_cnt_r==2:
+                    display_text("boxes record ending.", 1000)
+                    press_cnt_r=0
+
             # quit key listener
             elif pressed_key == ord('q'):
                 break
